@@ -5,11 +5,12 @@ import sys, time, threading
 import numpy as np
 import math
 
+
 def vectorLength(v):
 	return math.sqrt(np.dot(v, v))
 
 def refinement(points, thresh_degree=1):
-	if len(points) < 2: return points
+	if len(points) < 3: return points
 	cos_thresh = abs(math.cos(math.pi * thresh_degree / 180))
 	
 	pre_p = points[0]
@@ -33,13 +34,14 @@ def refinement(points, thresh_degree=1):
 				pre_p = p
 				pre_direct = direction
 	new_points.append(pre_p)
+	#new_points.append(points[0])
 
 	return new_points	
 			
 			
 
 class painter(QtWidgets.QWidget):
-	def __init__(self, name='CG Final'):
+	def __init__(self, name='CG Final', obj=None):
 		super().__init__()
 
 		self.setWindowTitle(name)
@@ -59,12 +61,17 @@ class painter(QtWidgets.QWidget):
 		# io controler
 		
 		# history progress
-		self.__recorder = []
 		self.__path = []
 		self.__history_canvas = []
 		
+		# obj
+		self.__obj = obj
+
 		# start
 		self.__ui()
+		#self.__gl_thread_on = True
+		#self.__gl_thread = threading.Thread(target=self.__glui)
+		#self.__gl_thread.start()
 
 	def __ui(self):
 		self.__canvas = QPixmap(self.__height, self.__width - self.__margin)
@@ -74,6 +81,13 @@ class painter(QtWidgets.QWidget):
 		self.__label.setGeometry(0, 0, self.__height, self.__width - self.__margin)
 		self.__label.setPixmap(self.__canvas)
 
+	#def __glui(self):
+	#	glutInit()
+	#	glutCreateWindow("3D View")
+	#	initGL()
+	#	glutKeyboardFunc(keydown)
+	#	glutDisplayFunc(display)
+	#	glutMainLoop()
 
 	def setPenColor(self, color_code='#000000'):
 		self.__penColor = QColor(color_code)
@@ -83,13 +97,19 @@ class painter(QtWidgets.QWidget):
 		
 	def mouseReleaseEvent(self,event): # 按下後放開
 		self.__path = refinement(self.__path)
-		self.__recorder.append(self.__path)
-		#print(len(self.__recorder))
-
-		self.setPenColor('#ffee00')
-		self.painting(self.__path)
-		#self.setPenColor('#ff0000')
-		#self.painting(self.__path, checkPoints=True)
+		
+		if self.__obj is not None:
+			success = self.__obj.saveStroke(self.__path, 'create')
+			if success:
+				self.setPenColor('#ffee00')
+				self.painting(self.__path, connected=True)
+				#update view3D
+				#update canvas
+			else:
+				self.setPenColor('#ff0000')
+				self.painting(self.__path)
+				#self.__undo()
+			
 		self.setPenColor()
 		self.__path = []
 
@@ -106,7 +126,8 @@ class painter(QtWidgets.QWidget):
 		if event.key() == 82:
 			self.__undo()
 
-	def painting(self, points, checkPoints=False):
+	# Painting
+	def painting(self, points, checkPoints=False, connected=False):
 		qpainter = QPainter()
 		qpainter.begin(self.__canvas)
 		qpainter.setPen(QPen(self.__penColor, self.__penSize, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
@@ -122,6 +143,8 @@ class painter(QtWidgets.QWidget):
 			else:
 				qpainter.drawLine(pre_point[0], pre_point[1], p[0], p[1])
 			pre_point = p
+		if connected:
+			qpainter.drawLine(pre_point[0], pre_point[1], points[0][0], points[0][1])
 		qpainter.end()
 		self.__label.setPixmap(self.__canvas)
 		self.update()
@@ -134,6 +157,8 @@ class painter(QtWidgets.QWidget):
 			self.__canvas= self.__history_canvas.pop()
 			self.__label.setPixmap(self.__canvas)
 			
+	#def closeEvent(self, event):
+	#	self.__gl_thread_on = False
 	
 if __name__ == "__main__":
 	app = QtWidgets.QApplication(sys.argv)
