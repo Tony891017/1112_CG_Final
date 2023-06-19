@@ -8,7 +8,7 @@ def objFileWriter(points, triangle_indices, file_name):
 		output_str += "\n"
 		output_file.write(output_str)
 
-	"""
+	
 	mirror_points = points
 	mirror_points[:, 2] *= -1
 	for v in mirror_points:
@@ -17,14 +17,14 @@ def objFileWriter(points, triangle_indices, file_name):
 			output_str += " " + str(x)
 		output_str += "\n"
 		output_file.write(output_str)
-	"""
+	
 	for i in triangle_indices:
 		output_str = "f"
 		for j in i:
 			output_str += " " + str(j + 1)
 		output_str += "\n"
 		output_file.write(output_str)
-	"""
+	
 	offset = len(points)
 	for i in triangle_indices:
 		output_str = "f"
@@ -32,5 +32,5 @@ def objFileWriter(points, triangle_indices, file_name):
 			output_str += " " + str(j + 1 + offset)
 		output_str += "\n"
 		output_file.write(output_str)
-	"""
+	
 	output_file.close()

@@ -5,6 +5,10 @@ import sys, time, threading
 import numpy as np
 import math
 
+from cv2 import convexHull
+
+from transformFunctions import *
+
 
 def vectorLength(v):
 	return math.sqrt(np.dot(v, v))
@@ -38,47 +42,6 @@ def refinement(points, thresh_degree=1):
 
 	return new_points	
 
-def lookAt(eye, at, up):
-	forward = np.subtract(at, eye)
-	forward = forward / np.linalg.norm(forward)
-
-	right = np.cross(forward, up)
-	right = right / np.linalg.norm(right)
-
-	UP = np.cross(right, forward)
-	
-	rotation_matrix = np.array([
-		[right[0], right[1], right[2], 0],
-		[UP[0], UP[1], UP[2], 0],
-		[-forward[0], -forward[1], -forward[2], 0],
-		[0, 0, 0, 1]
-	])
-
-	translation_matrix = np.array([
-		[1, 0, 0, -eye[0]],
-		[0, 1, 0, -eye[1]],
-		[0, 0, 1, -eye[2]],
-		[0, 0, 0, 1]
-	])
-	
-	view_matrix = np.dot(rotation_matrix, translation_matrix)
-
-	return view_matrix
-
-def perspective(fovy, aspect, zNear, zFar):
-	f = 1.0 / math.tan(fovy * math.pi / 360.0)
-	alpha = (zFar + zNear) / (zNear - zFar)
-	beta = 2.0 * zFar * zNear / (zNear - zFar)
-
-	perspective_matrix = np.array([
-		[f / aspect, 0, 0, 0],
-		[0, f, 0, 0],
-		[0, 0, alpha, beta],
-		[0, 0, -1.0, 0]
-	])
-
-	return perspective_matrix
-
 class painter(QtWidgets.QWidget):
 	def __init__(self, name='CG Final', obj=None):
 		super().__init__()
@@ -86,8 +49,8 @@ class painter(QtWidgets.QWidget):
 		self.setWindowTitle(name)
 		
 		# window size
-		self.__height = 750
-		self.__width = 500
+		self.__height = 600
+		self.__width = 600
 		self.resize(self.__height, self.__width)
 		self.setUpdatesEnabled(True)
 		# ui
@@ -98,9 +61,20 @@ class painter(QtWidgets.QWidget):
 		self.__penColor = QColor('#000000')
 
 		# projection control
-		#self.__eye = np.array([])
-		#self.__eye = np.array([])
-		self.theta = 0
+		self.__rotation = [0.0, 0.0, 0.0]
+		self.__distance = 50
+		self.__pos = np.array([0, -self.__distance, 0])
+		self.__look_at = np.array([0, 0, 0])
+		self.__up_vector = np.array([0, 0, 1])
+		half_width = self.__height / 2
+		half_height = self.__width / 2
+		self.__view_port = np.array([
+			[half_width, 0, 0, half_width],
+			[0, -half_height, 0, half_height],
+			[0, 0, 1, 0],
+			[0, 0, 0, 1]])
+
+		self.__projection_matrix = self.__transformMatrix()
 		
 		# history progress
 		self.__path = []
@@ -110,6 +84,7 @@ class painter(QtWidgets.QWidget):
 		self.__obj = obj
 
 		# start
+		self.__thread_on = True
 		self.__ui()
 
 	def __ui(self):
@@ -119,46 +94,37 @@ class painter(QtWidgets.QWidget):
 		self.__label = QtWidgets.QLabel(self)
 		self.__label.setGeometry(0, 0, self.__height, self.__width - self.__margin)
 		self.__label.setPixmap(self.__canvas)
-
-	def __perspectTransform(self):
-		#eye = np.array([10 * math.cos(self.theta), -10 * math.sin(self.theta), 0])
-		move = np.array([
-			[1, 0, 0, -self.__width // 2],
-			[0, 1, 0, -self.__height // 2],
-			[0, 0, 1, 0],
-			[0, 0, 0, 1]])
-		
-		eye = np.array([0, 0, 500])
-		at = np.array([0, 0, 0])
-		up = np.array([0, 0, 1])
-		view_matrix = lookAt(eye, at, up)
-		perspective_matrix = perspective(60, 1, 0.1, 50)
-		
-		return perspective_matrix @ view_matrix @ move
+	
+		self.__upDateView()
 
 	def setPenColor(self, color_code='#000000'):
 		self.__penColor = QColor(color_code)
 
+	# MOUSE EVENT
 	def mousePressEvent(self, event):
+		self.setPenColor('#ffee00')
 		self.__history_canvas.append(self.__label.pixmap())
 		
 	def mouseReleaseEvent(self,event): # 按下後放開
 		self.__path = refinement(self.__path)	
+		# 把path轉回相機畫面的座標
+		path = np.array(self.__path, dtype=np.float32)
+		path[:, 0] -= self.__height / 2
+		path[:, 1] -= self.__width / 2
+		path[:, 0] *= 2 / self.__height
+		path[:, 1] *= 2 / self.__width
+
 		if self.__obj is not None:
-			success = self.__obj.saveStroke(self.__path, 'create')
+			success = self.__obj.saveStroke(path.tolist(), self.__pos, 'create') # 要傳入相機位置
 			if success:
-				self.setPenColor('#ffee00')
-				self.painting(self.__path, connected=True)
-				#update view3D
-				#update canvas
+				self.__upDateView()
 			else:
 				self.setPenColor('#ff0000')
 				self.painting(self.__path)
-				#self.__undo()
+				self.__undo()
 			
 		self.setPenColor()
 		self.__path = []
-
 	
 	def mouseMoveEvent(self, event): # 滑鼠按下後才啟動
 		mx = int(QEnterEvent.position(event).x())
@@ -169,10 +135,35 @@ class painter(QtWidgets.QWidget):
 		self.__path.append([mx, my])
 			
 	def keyPressEvent(self, event):
-		if event.key() == 82:
+		key = event.key()
+		if key == 82: #r
 			self.__undo()
+		elif key == 74: #j
+			self.__rotation[2] += 15.0
+		elif key == 76: #l
+			self.__rotation[2] -= 15.0
+		elif key == 73: #i
+			self.__rotation[0] += 15.0
+		elif key == 75: #k
+			self.__rotation[0] -= 15.0
+		rx, ry, rz = self.__rotation
+		self.__pos = rotation(np.array([0, -self.__distance, 0]), rx, ry, rz)
+
+		if key == 48: #0
+			self.__pos[0] = 0.0
+			self.__pos[1] = -self.__distance
+			self.__pos[2] = 0.0
+			self.__rotation = [0.0, 0.0, 0.0]
+		#elif key == 79: #o
+		#elif key == 80: #p
+		print(key) 
+		self.__upDateView()
 
 	# Painting
+	def clearCanvas(self):
+		self.__canvas.fill(QColor('#ffffff'))
+		self.__label.setPixmap(self.__canvas)
+
 	def painting(self, points, checkPoints=False, connected=False):
 		qpainter = QPainter()
 		qpainter.begin(self.__canvas)
@@ -202,8 +193,57 @@ class painter(QtWidgets.QWidget):
 			print("[Undo]")
 			self.__canvas= self.__history_canvas.pop()
 			self.__label.setPixmap(self.__canvas)
-			
 	
+	def __upDateView(self):
+		x_axis = np.array([[0, 0, 0], [1, 0, 0]]) * 100
+		y_axis = np.array([[0, 0, 0], [0, 1, 0]]) * 100
+		z_axis = np.array([[0, 0, 0], [0, 0, 1]]) * 100
+		
+		self.clearCanvas()
+		self.setPenColor("#00ff00")
+		self.painting(self.projection(x_axis))
+		self.setPenColor("#ff0000")
+		self.painting(self.projection(y_axis))
+		self.setPenColor("#0000ff")
+		self.painting(self.projection(z_axis))
+		self.setPenColor()
+		
+		if self.__obj is not None:
+			points, tri_indices = self.__obj.getObj()
+			projected = self.projection(points)
+			
+			#找出最外圍的點就好
+			hull = convexHull(projected)
+			hull = np.reshape(hull, (len(hull), 2))
+
+			#或用for依次畫三角形
+			for tri in tri_indices:
+				v0, v1, v2 = projected[tri[0]], projected[tri[1]], projected[tri[2]]
+				self.painting(np.array([v0, v1, v2]), connected=True)
+			self.setPenColor("#ffff00")
+			self.painting(hull, connected=True)
+
+
+	def projection(self, points):
+		points = np.append(points, np.ones((len(points), 1)), axis=1).T
+		projected = self.__transformMatrix() @ points
+		projected = projected.T
+		for p in projected:
+			p /= p[3]
+			p /= p[2]
+		projected = np.int32(projected)[:, :2]
+		return projected
+			
+	def __transformMatrix(self):
+		look_at = lookAt(self.__pos, self.__look_at, self.__up_vector)
+		perspect = perspective(60, 1, -1, 100)
+		transform = self.__view_port @ perspect @ look_at
+		return transform
+	
+	def closeEvent(self, event):
+		self.__thread_on = False
+	
+		
 if __name__ == "__main__":
 	app = QtWidgets.QApplication(sys.argv)
 	user_interface = painter()

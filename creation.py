@@ -3,9 +3,18 @@ import math
 from cv2 import moments 
 
 def centerOfGravity(vertices):
+	min_x = min(vertices[:, 0])
+	min_y = min(vertices[:, 1])
+
+	if min_x < 0: vertices[:, 0] -= min_x
+	if min_y < 0: vertices[:, 1] -= min_y
+
 	m = moments(np.append(vertices, vertices[0:1], axis=0))
 	mx = int(m['m10'] / m['m00'])
 	my = int(m['m01'] / m['m00'])
+
+	if min_x < 0: mx += min_x
+	if min_y < 0: my += min_y
 	return mx, my
 
 def incenter(v1, v2, v3):
