@@ -85,7 +85,7 @@ class view3D:
 	
 	def shading(self, p, n, color):
 		light_position = [100.0, 100.0, 150.0]
-		light_direction = np.subtract(light_position, [0.0, 0.0, 0.0])
+		light_direction = np.subtract(light_position, p)#[0.0, 0.0, 0.0])
 		camera_position = [self.x, self.y, self.z]
 		view_vector = np.subtract(camera_position, p)#[0.0, 0.0, 0.0])
 
